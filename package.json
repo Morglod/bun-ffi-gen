@@ -1,5 +1,6 @@
 {
   "name": "bun-ffi-gen",
+  "version": "1.0.2",
   "module": "lib/index.ts",
   "description": "FFI bindings generator for Bun",
   "type": "module",
@@ -25,9 +26,11 @@
     "url": "git+https://github.com/Morglod/bun-ffi-gen.git"
   },
   "devDependencies": {
-    "@types/bun": "^1.0.8"
+    "typescript": "^5.0.0",
+    "bun-types": "^1.0.33"
   },
   "peerDependencies": {
-    "typescript": "^5.0.0"
+    "typescript": "^5.0.0",
+    "bun-types": "^1.0.33"
   }
 }

@@ -176,9 +176,9 @@ type _PartialStructArg<T> = {
 
 const Pointer = BunFFIType.ptr;
 type Pointer = BunPointer | null;
-type ConstPtrT<T> = (Pointer | NodeJS.TypedArray | Buffer) & { __type: T, __const_ptr: true };
-type PtrT<T> = (Pointer | NodeJS.TypedArray | Buffer) & { __type: T, __const_ptr: false };
-type TypedArrayPtr<T> = (NodeJS.TypedArray | Buffer) & { __type: T, __const_ptr: any };
+type ConstPtrT<T> = (Pointer | TypedArray | Buffer) & { __type: T, __const_ptr: true };
+type PtrT<T> = (Pointer | TypedArray | Buffer) & { __type: T, __const_ptr: false };
+type TypedArrayPtr<T> = (TypedArray | Buffer) & { __type: T, __const_ptr: any };
 
 export const NULL = null as any as Pointer & { __type: any, __const_ptr: any };
 
@@ -237,10 +237,10 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
         if (this.opts.readers) {
             this.writeLn(out, `export function read_${name}(from: BunPointer, offset: number): ${tsType} {`);
             if (d.ffiType === "BunFFIType.cstring") {
-                this.writeLn(out, `return new BunCString(bunRead.ptr(from, offset) as any as BunPointer);`, 1);
+                this.writeLn(out, `return new BunCString(bunRead.ptr(from, offset));`, 1);
             } else {
                 const readFn = this.mapFFITypeToReadFn(d.ffiType);
-                this.writeLn(out, `return bunRead.${readFn}(from, offset) as any;`, 1);
+                this.writeLn(out, `return bunRead.${readFn}(from, offset);`, 1);
             }
             this.writeLn(out, `}`);
         }
@@ -352,7 +352,7 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
             if (funcDeclCode instanceof Error) {
             } else {
                 this.writeLn(out, `export function read_${name}(from: BunPointer, offset: number): ${name} {`);
-                this.writeLn(out, `const ptr = bunRead.ptr(from, offset) as any as BunPointer;`, 1);
+                this.writeLn(out, `const ptr = bunRead.ptr(from, offset);`, 1);
                 this.writeLn(out, `return BunCFunction({`, 1);
                 this.writeLn(out, `ptr,`, 2);
                 this.writeLn(out, `...${funcDeclCode},`, 2);
