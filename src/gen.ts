@@ -52,7 +52,7 @@ const _mapFFITypeToReadFn = {
 };
 
 type GenOpts = {
-    paddingSize: number;
+    identWidth: number;
     readers: boolean;
     writers: boolean;
     helpers: boolean;
@@ -82,7 +82,7 @@ export class CodeGen {
     constructor(opts: Partial<GenOpts> = {}) {
         const funcSymbolsImportLibPath = opts.funcSymbolsImportLibPath || `import.meta.dir + "/mylib"`;
         this.opts = {
-            paddingSize: 4,
+            identWidth: 4,
             readers: true,
             writers: true,
             helpers: true,
@@ -125,7 +125,7 @@ export class CodeGen {
     }
 
     private writeLn(out: string[], str: string, padding: number = 0) {
-        out.push(" ".repeat(this.opts.paddingSize * padding) + str + "\n");
+        out.push(" ".repeat(this.opts.identWidth * padding) + str + "\n");
     }
 
     private mapFFITypeToTS(ffiType: string): string {
