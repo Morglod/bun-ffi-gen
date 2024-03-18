@@ -1,0 +1,33 @@
+{
+  "name": "bun-ffi-gen",
+  "module": "lib/index.ts",
+  "description": "FFI bindings generator for Bun",
+  "type": "module",
+  "main": "lib/index.ts",
+  "types": "lib/index.ts",
+  "author": {
+    "name": "morglod",
+    "url": "https://github.com/Morglod"
+  },
+  "license": "MIT",
+  "bugs": {
+    "url": "https://github.com/Morglod/bun-ffi-gen/issues"
+  },
+  "homepage": "https://github.com/Morglod/bun-ffi-gen#readme",
+  "keywords": [
+    "ffi",
+    "bun",
+    "codegen",
+    "bindings"
+  ],
+  "repository": {
+    "type": "git",
+    "url": "git+https://github.com/Morglod/bun-ffi-gen.git"
+  },
+  "devDependencies": {
+    "@types/bun": "^1.0.8"
+  },
+  "peerDependencies": {
+    "typescript": "^5.0.0"
+  }
+}
