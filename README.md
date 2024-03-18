@@ -3,9 +3,13 @@
 This set of tools used for FFI bindings generation for Bun.  
 Parser could be used for anything actually.
 
+Generates from .h C file.
+
 Currently latest Bun & TypeScript version should be used.
 
 Will exec `clang` to get ast and type infos, so it should be available in PATH.
+
+Feel free to write an issue with your header file, so I could tweak this package.
 
 ## Install
 
@@ -121,4 +125,84 @@ Passed to constructor, all options are optional.
     // generate alloc_* code (default true)
     structAllocs: boolean;
 }
+```
+
+## Generated bindings
+
+For example we have smth like this in .h file:
+
+```c
+typedef struct WGPUSurfaceImpl *WGPUSurface;
+
+typedef struct WGPUSurfaceConfiguration {
+    WGPUChainedStruct const * nextInChain;
+    WGPUDevice device;
+    WGPUTextureFormat format;
+    WGPUTextureUsageFlags usage;
+    size_t viewFormatCount;
+    WGPUTextureFormat const * viewFormats;
+    WGPUCompositeAlphaMode alphaMode;
+    uint32_t width;
+    uint32_t height;
+    WGPUPresentMode presentMode;
+} WGPUSurfaceConfiguration WGPU_STRUCTURE_ATTRIBUTE;
+
+WGPU_EXPORT void wgpuSurfaceConfigure(WGPUSurface surface, WGPUSurfaceConfiguration const * config) WGPU_FUNCTION_ATTRIBUTE;
+```
+
+This will be produced:
+
+```ts
+type WGPUSurface = Pointer;
+const read_WGPUSurface: (from: BunPointer, offset: number) => Pointer;
+const write_WGPUSurface: (x: Pointer | TypedArrayPtr<any>, buffer: Buffer, offset: number) => void;
+
+type WGPUSurfaceConfiguration = {
+    nextInChain: ConstPtrT<WGPUChainedStruct>;
+    device: WGPUDevice;
+    format: WGPUTextureFormat;
+    usage: WGPUTextureUsageFlags;
+    viewFormatCount: size_t;
+    viewFormats: ConstPtrT<WGPUTextureFormat>;
+    alphaMode: WGPUCompositeAlphaMode;
+    width: uint32_t;
+    height: uint32_t;
+    presentMode: WGPUPresentMode;
+};
+function read_WGPUSurfaceConfiguration(from: BunPointer, offset: number): WGPUSurfaceConfiguration;
+function write_WGPUSurfaceConfiguration(data, buffer: Buffer, offset: number): void;
+function alloc_WGPUSurfaceConfiguration(data, buffer?: Buffer): TypedArrayPtr<WGPUSurfaceConfiguration>;
+
+function wgpuSurfaceConfigure(surface, config): void;
+
+const bunImportedLib = dlopen(...);
+```
+
+Then you could do this things:
+
+```ts
+wgpuSurfaceConfigure(surface, {
+    // all other fields are optional
+    format: WGPUTextureFormat.WGPUTextureFormat_R16Sint,
+});
+
+// or allocate buffer manually
+// by default all non specified fields will be 0
+const buf = alloc_WGPUSurfaceConfiguration({});
+wgpuSurfaceConfigure(surface, buf);
+```
+
+## Helpers
+
+```ts
+// allocates zeroed string
+alloc_CString(str: string): BunCString;
+
+// in case when you want to set some pointer to null
+const NULL;
+
+// when you want to read array of items from binary
+// you could get cTypeSize from *__ffi_size constants when set structSizes=true in CodeGen
+// itemReader is one of read_* funcs
+bunReadArray(from, offset, cTypeSize, itemReader);
 ```
