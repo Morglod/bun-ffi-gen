@@ -25,9 +25,7 @@ bun install bun-ffi-gen
 Example of generating bindings for wgpu library.
 
 ```ts
-import { ClangTypeInfoCache, clangGetAstJson } from "bun-ffi-gen/clang";
-import { CodeGen } from "bun-ffi-gen/gen";
-import { parseClangAst } from "bun-ffi-gen/parser";
+import { ClangTypeInfoCache, clangGetAstJson, CodeGen, parseClangAst } from "bun-ffi-gen";
 
 const HEADER_PATH = "./wgpu/wgpu.h";
 const TYPE_CACHE_PATH = "./generate-wgpu-bindings_cache";

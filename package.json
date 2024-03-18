@@ -1,6 +1,6 @@
 {
   "name": "bun-ffi-gen",
-  "version": "1.0.5",
+  "version": "1.0.6",
   "module": "lib/index.ts",
   "description": "FFI bindings generator for Bun",
   "type": "module",
