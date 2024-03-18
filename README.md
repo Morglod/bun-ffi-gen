@@ -1,3 +1,6 @@
+[![NPM Version](https://badge.fury.io/js/bun-ffi-gen.svg?style=flat)](https://www.npmjs.com/package/bun-ffi-gen)
+[![GitHub stars](https://img.shields.io/github/stars/Morglod/bun-ffi-gen.svg?style=social&label=Star)](https://GitHub.com/Morglod/bun-ffi-gen/)
+
 # bun-ffi-gen
 
 This set of tools used for FFI bindings generation for Bun.  
