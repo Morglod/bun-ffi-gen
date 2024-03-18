@@ -5,6 +5,8 @@ Parser could be used for anything actually.
 
 Currently latest Bun & TypeScript version should be used.
 
+Will exec `clang` to get ast and type infos, so it should be available in PATH.
+
 ## Install
 
 ```
@@ -37,6 +39,7 @@ await clangTypeInfoCache.save();
 
 // prepare code generation
 const codeGen = new CodeGen({
+    // see more options below
     funcSymbolsImportLibPathCode(out) {
         out.push(`
             let _LIB_PATH: string = "";
