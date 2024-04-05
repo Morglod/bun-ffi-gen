@@ -1,3 +1,4 @@
+import { logVerbose } from "./log";
 import type {
     ParsedClangAstItem,
     ParsedClangAstItem_Alias,
@@ -155,6 +156,7 @@ export class CodeGen {
                 type Pointer as BunPointer,
                 read as bunRead,
                 suffix as bunSuffix,
+                toBuffer as bunToBuffer,
             } from "bun:ffi";`
         );
     }
@@ -170,15 +172,16 @@ type _PartialStructArg<T> = {
     T[P] extends PtrT<any> ? T[P] :
     T[P] extends ConstPtrT<any> ? T[P] :
     T[P] extends CString ? T[P] :
+    T[P] extends Buffer ? T[P] :
     T[P] extends object ? _PartialStructArg<T[P]> :
     T[P];
 };
 
 const Pointer = BunFFIType.ptr;
 type Pointer = BunPointer | null;
-type ConstPtrT<T> = (Pointer | TypedArray | Buffer) & { __type: T, __const_ptr: true };
-type PtrT<T> = (Pointer | TypedArray | Buffer) & { __type: T, __const_ptr: false };
-type TypedArrayPtr<T> = (TypedArray | Buffer) & { __type: T, __const_ptr: any };
+type ConstPtrT<T> = (Pointer | NodeJS.TypedArray | Buffer) & { __type: T, __const_ptr: true };
+type PtrT<T> = (Pointer | NodeJS.TypedArray | Buffer) & { __type: T, __const_ptr: false };
+type TypedArrayPtr<T> = (NodeJS.TypedArray | Buffer) & { __type: T, __const_ptr: any };
 
 export const NULL = null as any as Pointer & { __type: any, __const_ptr: any };
 
@@ -194,7 +197,7 @@ export function bunReadArray<T>(from: Pointer | TypedArrayPtr<T>, offset: number
 }
 
 export function alloc_CString(str: string) {
-    return new BunCString(bunPtr(Buffer.from(str + "\\0")));
+    return new BunCString(bunPtr(Buffer.from(str + "\\0")) as any);
 }
 
 export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr<any> {
@@ -237,10 +240,10 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
         if (this.opts.readers) {
             this.writeLn(out, `export function read_${name}(from: BunPointer, offset: number): ${tsType} {`);
             if (d.ffiType === "BunFFIType.cstring") {
-                this.writeLn(out, `return new BunCString(bunRead.ptr(from, offset));`, 1);
+                this.writeLn(out, `return new BunCString(bunRead.ptr(from, offset) as any);`, 1);
             } else {
                 const readFn = this.mapFFITypeToReadFn(d.ffiType);
-                this.writeLn(out, `return bunRead.${readFn}(from, offset);`, 1);
+                this.writeLn(out, `return bunRead.${readFn}(from, offset) as any;`, 1);
             }
             this.writeLn(out, `}`);
         }
@@ -307,6 +310,9 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
             this.writeLn(out, `${fieldName} = ${f.value},`, 1);
         }
         this.writeLn(out, `}`);
+        for (const [fieldName, f] of d.fields) {
+            this.writeLn(out, `export const ${fieldName} = ${name}.${fieldName};`, 0);
+        }
 
         if (this.opts.readers) {
             this.writeLn(out, `export function read_${name}(from: BunPointer, offset: number): ${name} {`);
@@ -321,6 +327,11 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
     }
 
     generateAlias(out: string[], name: string, d: ParsedClangAstItem_Alias) {
+        if (d.noEmit) {
+            logVerbose("skip noEmit alias", d);
+            return;
+        }
+
         this.writeLn(out, `export type ${name} = ${d.aliasTo.name};`);
 
         if (this.opts.readers) {
@@ -352,7 +363,7 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
             if (funcDeclCode instanceof Error) {
             } else {
                 this.writeLn(out, `export function read_${name}(from: BunPointer, offset: number): ${name} {`);
-                this.writeLn(out, `const ptr = bunRead.ptr(from, offset);`, 1);
+                this.writeLn(out, `const ptr = bunRead.ptr(from, offset) as any as BunPointer;`, 1);
                 this.writeLn(out, `return BunCFunction({`, 1);
                 this.writeLn(out, `ptr,`, 2);
                 this.writeLn(out, `...${funcDeclCode},`, 2);
@@ -396,7 +407,10 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
     }
 
     inlineTsType(d: ParsedClangAstItem): string {
-        if (d.name) return d.name;
+        if (d.type === "static_array" || d.type === "union") {
+            return `Buffer`;
+        }
+        if (!(d as any).noEmit && d.name) return d.name;
         switch (d.type) {
             case "alias":
                 return this.inlineTsType(d.aliasTo);
@@ -444,6 +458,11 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
                 if (f.valueType.type === "pointer") {
                     this.writeLn(out, `${f.name}: read_opaque_pointer(from, offset + ${f.offset}) as any,`, 2);
                 } else {
+                    if (f.valueType.type === "union" || f.valueType.type === "static_array") {
+                        this.writeLn(out, `${f.name}: bunToBuffer(from, offset + ${f.offset}, ${f.valueType.size}),`, 2);
+                        continue;
+                    }
+
                     if (!f.valueType.name) {
                         throw new Error("bad value type");
                     }
@@ -460,6 +479,10 @@ export function alloc_opaque_pointer(x: Pointer, buffer?: Buffer): TypedArrayPtr
                 if (f.valueType.type === "pointer") {
                     this.writeLn(out, `x.${f.name} !== undefined && write_opaque_pointer(x.${f.name}, buffer, offset + ${f.offset});`, 2);
                 } else {
+                    if (f.valueType.type === "union" || f.valueType.type === "static_array") {
+                        this.writeLn(out, `x.${f.name} !== undefined && buffer.copy(new Uint8Array(x.${f.name}), offset + ${f.offset}, 0, ${f.valueType.size});`, 1);
+                        continue;
+                    }
                     if (!f.valueType.name) {
                         throw new Error("bad value type");
                     }

@@ -1,20 +1,56 @@
-import { execSync } from "child_process";
+import { execSync as nodeExecSync, exec as nodeExec } from "child_process";
 import { existsSync, rmSync, writeFileSync } from "fs";
+import { logInfo, logVerbose } from "./log";
 
-export function clangGetAstJson(headerPath: string): any[] {
-    const cmd = "clang -Xclang -ast-dump=json -fsyntax-only " + headerPath;
-    const result = execSync(cmd).toString();
-    return JSON.parse(result).inner;
+const includeDirArgs: string[] = [];
+
+export function addIncludeDir(dir: string) {
+    includeDirArgs.push(`-I${dir}`);
+}
+
+export const execSync: typeof nodeExecSync = (command: string, ...args: any): any => {
+    logVerbose("execSync", command);
+    return nodeExecSync(command, ...args);
+};
+
+export async function execLargeJSON(command: string): Promise<any> {
+    logVerbose("execLargeJSON", command);
+    const tmpFileName = `./exec_tmp_${Date.now()}_${Math.floor(Math.random() * 9999)}`;
+
+    nodeExecSync(command + " > " + tmpFileName);
+    const json = await Bun.file(tmpFileName).json();
+    rmSync(tmpFileName);
+
+    return json;
+}
+
+export async function clangGetAstJson(headerPath: string): Promise<any[]> {
+    const cmd = `clang -Xclang -ast-dump=json -fsyntax-only ${includeDirArgs.join(" ")} ` + headerPath;
+
+    logInfo(`clangGetAstJson headerPath="${headerPath}" command="${cmd}"`);
+
+    const result = await execLargeJSON(cmd);
+    return result.inner;
 }
 
 export function clangCompileAndRunReadOut(code: string) {
-    execSync("clang -x c - -o ./generate-bindings_tmp_exec", {
+    const command = `clang ${includeDirArgs.join(" ")} -x c++ - -o ./generate-bindings_tmp_exec`;
+    if (command === "clang -I/Users/work_vk/Desktop/Dev/personal/bun-ffi-gen/include -x c++ - -o ./generate-bindings_tmp_exec") {
+        execSync("clang -I/Users/work_vk/Desktop/Dev/personal/bun-ffi-gen/include -x c++ - -E > aaa", {
+            input: code,
+            stdio: "pipe",
+        });
+    }
+    execSync(command, {
         input: code,
+        stdio: "pipe",
     });
     return execSync("./generate-bindings_tmp_exec").toString();
 }
 
 export async function clangClean() {
+    logInfo("clangClean");
+
     if (existsSync("./generate-bindings_tmp_exec")) {
         rmSync("./generate-bindings_tmp_exec");
     }
@@ -27,11 +63,14 @@ export class ClangTypeInfoCache {
     offsetOf: Record<string, number> = {};
 
     async save() {
+        logInfo("ClangTypeInfoCache.save");
         writeFileSync(this.cacheFilePath + "_sizeof.json", JSON.stringify(this.sizeOf));
         writeFileSync(this.cacheFilePath + "_offsetof.json", JSON.stringify(this.offsetOf));
     }
 
     static async create(cacheFilePath: string) {
+        logInfo(`ClangTypeInfoCache.create cacheFilePath="${cacheFilePath}"`);
+
         let sizeOf = {};
         if (await Bun.file(cacheFilePath + "_sizeof.json").exists()) {
             sizeOf = await Bun.file(cacheFilePath + "_sizeof.json").json();
@@ -84,7 +123,9 @@ export function clangGetOffsetOf(headerPath: string, cTypeName: string, fieldNam
         #include <stdio.h>
 
         int main() {
-            printf("[ %lu ]", offsetof(${cTypeName}, ${fieldName}));
+            printf("[ %lu ]",
+                ((size_t)&(reinterpret_cast<${cTypeName}*>(0)->${fieldName}))
+            );
             return 0;
         }
     `;

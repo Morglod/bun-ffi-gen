@@ -1,6 +1,7 @@
 import { basename } from "path";
 import { POINTER_SIZE } from "./constants";
 import { ClangTypeInfoCache, clangGetOffsetOf, clangGetSizeOf } from "./clang";
+import { logInfo, logVerbose } from "./log";
 
 export type ParsedClangAstItem =
     | ParsedClangAstItem_Enum
@@ -9,7 +10,9 @@ export type ParsedClangAstItem =
     | ParsedClangAstItem_Builtin
     | ParsedClangAstItem_FuncDecl
     | ParsedClangAstItem_FuncPointer
-    | ParsedClangAstItem_Struct;
+    | ParsedClangAstItem_Struct
+    | ParsedClangAstItem_StaticArray
+    | ParsedClangAstItem_Union;
 
 export type ParsedClangAstItem_Enum_FieldValue =
     | {
@@ -35,8 +38,15 @@ export type ParsedClangAstItem_Enum = {
 export type ParsedClangAstItem_Alias = {
     type: "alias";
     size: number;
+    noEmit?: boolean;
     name?: string;
     aliasTo: ParsedClangAstItem;
+};
+
+export type ParsedClangAstItem_LazyAlias = {
+    type: "lazy_alias";
+    name: string;
+    aliasTo: string;
 };
 
 export type ParsedClangAstItem_Pointer = {
@@ -82,11 +92,26 @@ export type ParsedClangAstItem_Struct = {
     fields: ParsedClangAstItem_Struct_Field[];
 };
 
+export type ParsedClangAstItem_StaticArray = {
+    type: "static_array";
+    length: number;
+    size: number;
+    name: string;
+    itemType: ParsedClangAstItem;
+};
+
 export type ParsedClangAstItem_FuncPointer = {
     type: "func_pointer";
     size: number;
     name?: string;
     decl: ParsedClangAstItem_FuncDecl;
+};
+
+export type ParsedClangAstItem_Union = {
+    type: "union";
+    size: number;
+    name?: string;
+    variants: ParsedClangAstItem_Struct_Field[];
 };
 
 export type ParsedClangAstResult = {
@@ -104,16 +129,33 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
         funcTypeSymbols: new Set(),
     };
 
+    const lazyAliases = new Map<string, ParsedClangAstItem_LazyAlias>();
+
     function emitDecl(name: string, item: ParsedClangAstItem) {
         if (result.decls.has(name)) {
             debugger;
             console.warn("overwrite decl name=", name, "item=", item);
         }
         result.decls.set(name, item);
+
+        // resolve lazy aliases
+        if (lazyAliases.has(name)) {
+            const la = lazyAliases.get(name)!;
+            lazyAliases.delete(name);
+            emitDecl(la.name, {
+                type: "alias",
+                size: item.size,
+                name: la.name,
+                aliasTo: item,
+            });
+        }
         return item;
     }
 
     function aliasDecl(aliasTo: ParsedClangAstItem): ParsedClangAstItem {
+        if (aliasTo.type === "alias" && aliasTo.noEmit) {
+            return aliasTo.aliasTo;
+        }
         return {
             type: "alias",
             name: aliasTo.name,
@@ -125,7 +167,7 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
     function getDecl(name: string, makeAlias: boolean): ParsedClangAstItem {
         if (!result.decls.has(name)) {
             debugger;
-            throw new Error("decl not found");
+            throw new Error(`decl not found "${name}"`);
         }
         const t = result.decls.get(name)!;
         if (makeAlias) return aliasDecl(t);
@@ -159,11 +201,50 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
 
     const findDeclOrThrow = (...args: Parameters<typeof findDecl>): ParsedClangAstItem => {
         const found = findDecl(...args);
-        if (!found) throw new Error("not found");
+        if (!found) throw new Error(`not found "${JSON.stringify(args)}"`);
         return found;
     };
 
+    function parseUnionDecl(unionDecl: any): Omit<ParsedClangAstItem_Union, "size"> {
+        const variants: ParsedClangAstItem_Union["variants"] = [];
+
+        for (const field of unionDecl.inner) {
+            const fieldType = extractQualTypeOrPtr(field.type.qualType);
+            const fieldName = field.name;
+            variants.push({
+                name: fieldName,
+                size: fieldType.size,
+                offset: 0,
+                valueType: fieldType,
+            });
+        }
+
+        return {
+            type: "union",
+            variants,
+        };
+    }
+
     function extractQualTypeOrPtr(qualType: string): ParsedClangAstItem {
+        // static array definition
+        if (qualType.endsWith("]")) {
+            const staticArrayMatch = qualType.trim().match(/^([\w\W]+)\[(\w+)\]$/);
+            if (!staticArrayMatch) {
+                debugger;
+                throw new Error(`failed match static array type "${qualType}"`);
+            }
+            const baseItemName = staticArrayMatch[1].trim();
+            const length = Number(staticArrayMatch[2]);
+            const itemType = extractQualTypeOrPtr(baseItemName);
+            return {
+                type: "static_array",
+                name: qualType, // TODO probably bad
+                length,
+                itemType,
+                size: itemType.size * length,
+            };
+        }
+
         if (qualType === "const char *") {
             return findDeclOrThrow({ name: "CString" }, false);
         }
@@ -172,8 +253,8 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
         let is_const = false;
         let isPtr = false;
 
-        const constPtrMatch = (qualType as string).match(/^const (?:struct\s)?(\w+) \*$/);
-        const ptrMatch = (qualType as string).match(/^(?:struct\s)?(\w+) \*$/);
+        const constPtrMatch = qualType.match(/^const (?:struct\s)?(\w+) \*$/);
+        const ptrMatch = qualType.match(/^(?:struct\s)?([\w\W\s]+)\s?\*(?:const)?$/);
 
         if (constPtrMatch) {
             ptrBaseName = constPtrMatch[1];
@@ -207,12 +288,28 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
 
     emitBuiltinTypes(result);
 
-    for (const statement of astJson) {
+    for (let statementIndex = 0; statementIndex < astJson.length; ++statementIndex) {
+        const statement = astJson[statementIndex];
+
         // if (statement.name === "WGPUQuerySet") debugger;
         if (filterStatement(statement, headerFileBaseName)) continue;
 
         // enum
         if (statement.kind === "EnumDecl") {
+            CDECL_STYLE: if (!statement.name) {
+                const nextStatement = astJson[statementIndex + 1];
+                if (nextStatement?.kind === "TypedefDecl") {
+                    if (nextStatement.range?.begin.line <= statement.loc.line && nextStatement.range?.begin.col <= statement.loc.col) {
+                        statement.name = nextStatement.name;
+                        ++statementIndex;
+                        break CDECL_STYLE;
+                    }
+                }
+                debugger;
+                logVerbose(`unknown unnamed EnumDecl ${JSON.stringify(statement)}`);
+                continue;
+            }
+
             const enumItem: ParsedClangAstItem_Enum = {
                 type: "enum",
                 size: 4,
@@ -220,10 +317,29 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
                 fields: new Map(),
             };
 
+            let enumValueCounter: undefined | "no-counter" | number = undefined;
             for (const item of statement.inner) {
                 const itemName = item.name;
-                const value = parseEnumValue(item.inner);
-                enumItem.fields.set(itemName, value);
+                if (item.kind === "FullComment") continue;
+                if (item.inner) {
+                    const value = parseEnumValue(item.inner);
+                    if (value.type === "int") {
+                        enumValueCounter = Number(value.value);
+                    } else {
+                        enumValueCounter = "no-counter";
+                    }
+                    enumItem.fields.set(itemName, value);
+                } else {
+                    if (enumValueCounter === "no-counter") {
+                        throw new Error(`enum with mixed implicit & explicit declarations ${JSON.stringify(statement)}`);
+                    }
+                    if (enumValueCounter === undefined) enumValueCounter = 0;
+                    enumItem.fields.set(itemName, {
+                        type: "int",
+                        value: `${enumValueCounter}`,
+                    });
+                    enumValueCounter++;
+                }
             }
 
             emitDecl(statement.name, enumItem);
@@ -260,9 +376,44 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
             const structSize = clangGetSizeOf(headerFilePath, name, clangTypeInfoCache);
             const fields: ParsedClangAstItem_Struct_Field[] = [];
 
-            for (const item of statement.inner) {
+            for (let itemIndex = 0; itemIndex < statement.inner.length; ++itemIndex) {
+                const item = statement.inner[itemIndex];
+
+                if (item.kind === "FullComment") {
+                    continue;
+                }
+
+                if (item.tagUsed === "union" && item.kind === "RecordDecl") {
+                    const unionFieldType = parseUnionDecl(item);
+                    const nextItem = statement.inner[itemIndex + 1];
+
+                    if (!item.name && nextItem?.kind === "FieldDecl" && nextItem.range?.begin.line <= item.loc.line && nextItem.range?.begin.col <= item.loc.col) {
+                        item.name = nextItem.name;
+                        ++itemIndex;
+                    }
+
+                    const fieldOffset = clangGetOffsetOf(headerFilePath, name, item.name, clangTypeInfoCache);
+                    const fieldSize = clangGetSizeOf(headerFilePath, `(sizeof ((${name}*)0)->${item.name})`, clangTypeInfoCache);
+
+                    fields.push({
+                        name: item.name,
+                        size: fieldSize,
+                        offset: fieldOffset,
+                        valueType: {
+                            ...unionFieldType,
+                            size: fieldSize,
+                        },
+                    });
+                    continue;
+                }
+
                 if (item.kind !== "FieldDecl") {
                     debugger;
+                    throw new Error(`unknown field kind in struct ${JSON.stringify(item)}`);
+                }
+
+                if (!item.name) {
+                    throw new Error(`unknown field in struct ${JSON.stringify(item)}`);
                 }
 
                 const fieldName = item.name;
@@ -285,23 +436,6 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
                 size: structSize,
                 fields,
             });
-
-            continue;
-        }
-
-        // opque pointer type
-        if (statement.kind === "TypedefDecl" && statement.type.qualType.startsWith("struct ") && statement.type.qualType.endsWith("Impl *")) {
-            // TODO: base type
-            const pointerItem: ParsedClangAstItem_Pointer = {
-                type: "pointer",
-                is_const: false,
-                size: POINTER_SIZE,
-                name: statement.name,
-            };
-
-            // debugger;
-
-            emitDecl(statement.name, pointerItem);
 
             continue;
         }
@@ -386,6 +520,23 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
             continue;
         }
 
+        // opque pointer type
+        if (statement.kind === "TypedefDecl" && statement.type.qualType.endsWith(" *")) {
+            // TODO: base type
+            const pointerItem: ParsedClangAstItem_Pointer = {
+                type: "pointer",
+                is_const: false,
+                size: POINTER_SIZE,
+                name: statement.name,
+            };
+
+            // debugger;
+
+            emitDecl(statement.name, pointerItem);
+
+            continue;
+        }
+
         // func decl
         if (statement.kind === "FunctionDecl") {
             const declName = statement.name;
@@ -418,6 +569,49 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
 
             continue;
         }
+
+        if (statement.kind === "TypedefDecl" && statement.type.qualType.endsWith(" *")) {
+            // TODO: base type
+            const pointerItem: ParsedClangAstItem_Pointer = {
+                type: "pointer",
+                is_const: false,
+                size: POINTER_SIZE,
+                name: statement.name,
+            };
+
+            // debugger;
+
+            emitDecl(statement.name, pointerItem);
+
+            continue;
+        }
+
+        if (statement.kind === "TypedefDecl") {
+            if (statement.type?.qualType) {
+                try {
+                    const aliasType = extractQualTypeOrPtr(statement.type?.qualType);
+                    emitDecl(statement.name, {
+                        name: statement.name,
+                        type: "alias",
+                        size: aliasType.size,
+                        aliasTo: aliasType,
+                    });
+                    continue;
+                } catch {}
+            }
+            if (statement.type?.qualType.startsWith("struct ")) {
+                const structAliasOrDecl = statement.type.qualType.substr("struct ".length);
+                lazyAliases.set(statement.name, {
+                    type: "lazy_alias",
+                    aliasTo: structAliasOrDecl,
+                    name: statement.name,
+                });
+                continue;
+            }
+        }
+
+        logInfo(`unknown statement, skipping`, statement);
+        debugger;
     }
 
     return result;
@@ -467,26 +661,27 @@ function parseEnumValue(ast: any): ParsedClangAstItem_Enum_FieldValue {
     }
 
     if (ast.kind === "BinaryOperator") {
-        if (ast.opcode === "<<") {
-            const a = parseEnumValue(ast.inner[0]);
-            const b = parseEnumValue(ast.inner[1]);
+        const a = parseEnumValue(ast.inner[0]);
+        const b = parseEnumValue(ast.inner[1]);
 
-            return { type: "expr", value: `(${a.value} << ${b.value})` };
-        }
+        return { type: "expr", value: `((${a.value}) ${ast.opcode} (${b.value}))` };
+    }
 
-        if (ast.opcode === "|") {
-            const a = parseEnumValue(ast.inner[0]);
-            const b = parseEnumValue(ast.inner[1]);
-
-            return { type: "expr", value: `(${a.value} | ${b.value})` };
-        }
+    if (ast.kind === "UnaryOperator") {
+        const a = parseEnumValue(ast.inner[0]);
+        return { type: "expr", value: `(${ast.opcode} ${a.value})` };
     }
 
     if (ast.kind === "DeclRefExpr") {
         return { type: "alias", value: ast.referencedDecl.name };
     }
 
-    throw new Error("unknown enum value");
+    if (ast.kind === "ParenExpr") {
+        const a = parseEnumValue(ast.inner[0]);
+        return { type: "expr", value: `(${a.value})` };
+    }
+
+    throw new Error(`unknown enum value "${JSON.stringify(ast)}"`);
 }
 
 function emitBuiltinTypes(out: ParsedClangAstResult) {
@@ -496,6 +691,17 @@ function emitBuiltinTypes(out: ParsedClangAstResult) {
             name,
             size,
             ffiType,
+        });
+    }
+
+    function emitAlias(name: string, aliasTo: string, noEmit?: "no-emit") {
+        const foundAlias = out.decls.get(aliasTo)!;
+        out.decls.set(name, {
+            type: "alias",
+            aliasTo: foundAlias,
+            size: foundAlias.size,
+            noEmit: !!noEmit,
+            name,
         });
     }
 
@@ -520,4 +726,25 @@ function emitBuiltinTypes(out: ParsedClangAstResult) {
     emitSimple("double", 8, "BunFFIType.double");
 
     emitSimple("opaque_pointer", POINTER_SIZE, "BunFFIType.pointer");
+
+    // alias
+    emitAlias("char", "int8_t", "no-emit");
+    emitAlias("unsigned char", "uint8_t", "no-emit");
+    emitAlias("int", "int32_t", "no-emit");
+    emitAlias("short", "int16_t", "no-emit");
+    emitAlias("unsigned short", "uint16_t", "no-emit");
+    emitAlias("unsigned int", "uint32_t", "no-emit");
+    emitAlias("long long", "int64_t", "no-emit");
+    emitAlias("unsigned long long", "uint64_t", "no-emit");
+    emitAlias("unsigned long", "uint64_t", "no-emit");
+
+    emitAlias("u_int8_t", "uint8_t");
+    emitAlias("u_int16_t", "uint16_t");
+    emitAlias("u_int32_t", "uint32_t");
+    emitAlias("u_int64_t", "uint64_t");
+
+    emitAlias("__int8_t", "int8_t");
+    emitAlias("__int16_t", "int16_t");
+    emitAlias("__int32_t", "int32_t");
+    emitAlias("__int64_t", "int64_t");
 }

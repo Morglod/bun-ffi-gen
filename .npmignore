@@ -2,3 +2,4 @@ node_modules
 generate-wgpu-bindings_cache_*.json
 generate-bindings_tmp_exec
 example.ts
+src

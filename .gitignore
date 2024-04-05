@@ -1,6 +1,8 @@
 generate-wgpu-bindings_cache_*.json
 generate-bindings_tmp_exec
 example.ts
+lib
+bindings_cache_*
 
 # Based on https://raw.githubusercontent.com/github/gitignore/main/Node.gitignore
 
