@@ -6,6 +6,10 @@ export enum LogLevel {
 
 export let logLevel = LogLevel.info;
 
+export function setLogLevel(lvl: LogLevel) {
+    logLevel = lvl;
+}
+
 export function logVerbose(...args: any[]) {
     if (logLevel === LogLevel.verbose) console.log("[verbose]", ...args);
 }
