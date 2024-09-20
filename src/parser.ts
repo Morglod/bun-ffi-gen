@@ -255,6 +255,7 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
 
         const constPtrMatch = qualType.match(/^const (?:struct\s)?(\w+) \*$/);
         const ptrMatch = qualType.match(/^(?:struct\s)?([\w\W\s]+)\s?\*(?:const)?$/);
+        const fnPtrMatch = qualType.match(/^^.*?\(\s*\*\s*([\w\W\s]*?)\s*\).*$/);
 
         if (constPtrMatch) {
             ptrBaseName = constPtrMatch[1];
@@ -263,6 +264,8 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
         } else if (ptrMatch) {
             ptrBaseName = ptrMatch[1];
             isPtr = true;
+        } else if (fnPtrMatch){
+            isCallback = true;
         }
 
         if (isPtr) {
@@ -281,6 +284,13 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
                     baseType: findDecl({ name: ptrBaseName }, true),
                 }
             );
+        } else if(isCallback){
+            return {
+                type: "pointer",
+                is_const: false,
+                size: POINTER_SIZE,
+                baseType: findDecl({ name: 'void' }, true),
+            }
         }
 
         return findDeclOrThrow({ name: qualType }, true);
