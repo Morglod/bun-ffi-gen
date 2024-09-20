@@ -734,6 +734,7 @@ function emitBuiltinTypes(out: ParsedClangAstResult) {
     emitAlias("short", "int16_t", "no-emit");
     emitAlias("unsigned short", "uint16_t", "no-emit");
     emitAlias("unsigned int", "uint32_t", "no-emit");
+    emitAlias("long", "int64_t", "no-emit");
     emitAlias("long long", "int64_t", "no-emit");
     emitAlias("unsigned long long", "uint64_t", "no-emit");
     emitAlias("unsigned long", "uint64_t", "no-emit");
