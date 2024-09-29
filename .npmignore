@@ -7,3 +7,4 @@ src
 test.h
 test.ts
 .vscode
+test_out.ts
