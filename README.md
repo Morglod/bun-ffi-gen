@@ -35,7 +35,7 @@ const TYPE_CACHE_PATH = "./generate-wgpu-bindings_cache";
 addIncludeDir(path.resolve("my_include_dir"));
 
 // get header ast from clang
-const wgpuAst = clangGetAstJson(HEADER_PATH);
+const wgpuAst = await clangGetAstJson(HEADER_PATH);
 
 // create clang types cache (for sizeof / offsetof)
 const clangTypeInfoCache = await ClangTypeInfoCache.create(TYPE_CACHE_PATH);
