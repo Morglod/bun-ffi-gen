@@ -14,6 +14,8 @@ Will exec `clang` to get ast and type infos, so it should be available in PATH.
 
 Feel free to write an issue with your header file, so I could tweak this package.
 
+Tested on clang13 & bun 1.0.2 (upper versions requests macos update, goodbye bun)
+
 ## Install
 
 ```

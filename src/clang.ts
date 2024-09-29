@@ -97,6 +97,8 @@ export function clangGetSizeOf(headerPath: string, cTypeName: string, cache?: Cl
         return cache.sizeOf[cacheName];
     }
 
+    logInfo(`clangGetSizeOf "${cTypeName}"`);
+
     const code = `
         #include "${headerPath}"
         #include <stdio.h>
@@ -117,6 +119,8 @@ export function clangGetOffsetOf(headerPath: string, cTypeName: string, fieldNam
     if (cache && cacheName in cache.offsetOf) {
         return cache.offsetOf[cacheName];
     }
+
+    logInfo(`clangGetOffsetOf "${cTypeName}"."${fieldName}"`);
 
     const code = `
         #include "${headerPath}"

@@ -367,7 +367,19 @@ export function parseClangAst(astJson: any[], headerFilePath: string, clangTypeI
 
         // struct
         if (statement.kind === "RecordDecl") {
-            const name = statement.name;
+            let name = statement.name;
+
+            // handle case for typedef struct {} NAME;
+            if (!name) {
+                const nextStmt = astJson[statementIndex + 1];
+                if (nextStmt && nextStmt.kind === "TypedefDecl" && nextStmt.inner?.[0]?.ownedTagDecl.id === statement.id) {
+                    name = nextStmt.name;
+                    statementIndex++;
+                } else {
+                    logInfo("found RecordDecl without name at ", statement.loc);
+                    continue;
+                }
+            }
 
             if (!statement.inner) {
                 continue;

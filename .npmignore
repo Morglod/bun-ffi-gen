@@ -1,5 +1,9 @@
 node_modules
 generate-wgpu-bindings_cache_*.json
+test-bindings_cache_*.json
 generate-bindings_tmp_exec
 example.ts
 src
+test.h
+test.ts
+.vscode

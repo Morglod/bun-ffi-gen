@@ -196,6 +196,14 @@ export function bunReadArray<T>(from: Pointer | TypedArrayPtr<T>, offset: number
     return out;
 }
 
+export function bunAllocArray<T>(cTypeSize: number, items: T[], itemWriter: (item: T, buffer: Buffer, offset: number) => void): TypedArrayPtr<T> {
+    const buf = Buffer.alloc(cTypeSize * items.length);
+    for (let i = 0; i < items.length; ++i) {
+        itemWriter(items[i], buf, i * cTypeSize);
+    }
+    return buf as TypedArrayPtr<T>;
+}
+
 export function alloc_CString(str: string) {
     return new BunCString(bunPtr(Buffer.from(str + "\\0")) as any);
 }
